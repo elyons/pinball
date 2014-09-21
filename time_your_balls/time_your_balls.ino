@@ -12,39 +12,53 @@
  * int numDevices The maximum number of devices that can be controled
 */
 
-//LedControl(int dataPin, int clkPin, int csPin, int numDevices);
-LedControl lc=LedControl(4,2,3,1);
 
 int pin = 5; // INPUT from switch
 
 unsigned long lastDebounceTime = 0;  // the last time the output pin was toggled
-unsigned long ball_in_trough =0;
-unsigned long last_ball_in_trough=0;
-int debounceDelay = 500; 
-unsigned long clockTime =0;
+unsigned long ball_in_trough =0; //counter for when ball is in trough
+unsigned long last_ball_in_trough=0; // last count for ball_in_trough
+int debounceDelay = 500; //time between checking on the state of things
+unsigned long clockTime =0; //counter for how long has the ball been in play
 int clock_running = 0; // is the clock running?
+
+//LedControl(int dataPin, int clkPin, int csPin, int numDevices);
+// dataPIn: 4
+// clkPin: 2
+// csPin (load): 3
+// numDevices: 1
+LedControl lc=LedControl(4,2,3,1);
 
 void setup() {
   pinMode(pin, INPUT);
-  Serial.begin(9600);
-  for(int index=0;index<lc.getDeviceCount();index++) {
-    lc.shutdown(index,false);
-    lc.setIntensity(index, 15);
-    printTime(0);
-  }
+//  Serial.begin(9600); // for debugging
+  lc.shutdown(0,false);
+  lc.setIntensity(0, 15);
+  printTime(0);
+  countDown();
+  lastDebounceTime= millis();
 }
 
-
+// My display was having problems initializing when connected to an external power source.  
+// Worked fine when connected to a USB port, but I wasn't going to keep a computer in the pinball machine at all times
+// My solution was to do a second intiialization when the main loop started to run.
+int initialized = 0;  //Have we done the second initialization of the display?
 void loop() {
+  if (initialized = 0) { // first time through, reinitialize the display
+     delay(1000);
+     LedControl lc=LedControl(4,2,3,1);
+    lc.shutdown(0,false);
+    lc.setIntensity(0, 15);
+    initialized = 1; // set flag so initialization only happens once
+  }
   //if clock is running, show time
   if (clock_running) {printTime(millis()-clockTime);}
-  
+
   //state will be low when ball is in trough
   //state will be high when ball is not in trough
   int state = digitalRead(pin);
   
-//  Serial.println(state);
-//  printNumber(123);
+//  Serial.println(state); // debugging
   if (state == 0) {
     ball_in_trough++;
   }
@@ -53,26 +67,37 @@ void loop() {
   //let's check the state every debounce Period
   if (millis() - lastDebounceTime > debounceDelay) {
     //debuggin stuff to figure out correct limits for ball_in_trough and logic for starting stopping clock
-    Serial.print(state);
-    Serial.print(" ");
-    Serial.println(ball_in_trough);
+//    Serial.print(state);
+//    Serial.print(" ");
+//    Serial.println(ball_in_trough);
 
     //reset debounce
     lastDebounceTime = 0;
 
     //check to see if ball has been released from trough.  If so, reset ball_in_trough
-    if (ball_in_trough > 10 && ball_in_trough == last_ball_in_trough) { // ball has been released
-        ball_in_trough =0;
+    if (ball_in_trough > 10 && (ball_in_trough -last_ball_in_trough)<10) { // ball has been released
+        // the logic is that the ball_in_trough count will increase slowly (if at all) between checks 
+        // because the power supplied to one side of the switch from the arduino is running through the switch
+        // when there is no ball in the trough and closing the switch (switch is open when ball is released).  
+        // The power then runs to the arduino input pin for checking on the switch's state.  
+        // This has a pull-down to the ground.  THe power running across  the switch must be high enough to 
+        // overrun the pull-down.  
+
+        ball_in_trough =0; // reset counter to 0
     }
 
     //check to see what to do with starting/stopping clock
-    if (clock_running && ball_in_trough > 500) { // clock is running; ball in trough: stop clock
-      clock_running = 0;
-      //need to make sure that ball saver isn't saving the ball.  Usually ~5 seconds for ball saver, then another 5 seconds for the ball to be plunged.
+    if (clock_running && ball_in_trough > 200) { // clock is running; ball in trough: stop clock
+      // The number of 200 is emperically choosen.  This is based on the number of LOWs sensed when the switch is closed.
+      
+      clock_running = 0; // turn off the clock
+
+      // Need to make sure that ball saver isn't saving the ball.  Usually ~5 seconds for ball saver, 
+      // then another 5 seconds for the ball to be plunged.
       if (millis()-clockTime > 10000) {countDown();}
     } 
     else if (clock_running == 0 && ball_in_trough < 10) { //ball out of trough, clock not started:  start clock!
-      clock_running=1;
+      clock_running = 1;
       startClock();
     }
 
@@ -87,6 +112,7 @@ void loop() {
     lastDebounceTime = millis();
   }
 }
+
 
 //10 second countdown for people to check out their ball time
 void countDown() {
@@ -113,6 +139,7 @@ void countDown() {
        lc.setChar(0,7,' ',false);
        delay (100);
     }  
+    ball_in_trough = 0;
 }
 
 void resetClock(){
@@ -170,32 +197,4 @@ void printTime(unsigned long v) {
     lc.setDigit(0,0,(int)tens,false);
 }
 
-void printNumber(int v) {
-    int ones;
-    int tens;
-    int hundreds;
-    boolean negative;	
-
-    if(v<0) {
-        negative=true;
-        v=v*-1;
-    }
-    ones=v%10;
-    v=v/10;
-    tens=v%10;
-    v=v/10;
-    hundreds=v;			
-    if(negative) {
-       //print a minus on the first MAX72XX, 4'th digit from the right, no decimal-point	
-       lc.setChar(0,3,'-',false);
-    }
-    else {
-       //print a blank in the sign column
-       lc.setChar(0,3,' ',false);
-    }
-    //Now print the number digit by digit
-    lc.setDigit(0,2,(byte)hundreds,false);
-    lc.setDigit(0,1,(byte)tens,false);
-    lc.setDigit(0,0,(byte)ones,false);
-}
 
